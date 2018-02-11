@@ -360,15 +360,15 @@ class EmbeddingModel(object):
             plot_only = 500
             low_dim_embs = tsne.fit_transform(s_embeddings[:plot_only, :])
             labels = [df.reversed_dictionary[i] for i in xrange(plot_only)]
-            self.plot_with_labels(low_dim_embs, labels, output_directory + 's_embedding.png')
+            self.plot_with_labels(low_dim_embs, labels, os.path.join(output_directory, 's_embedding.png'))
 
             low_dim_embs = tsne.fit_transform(c_embeddings[:plot_only, :])
             labels = [df.reversed_dictionary[i] for i in xrange(plot_only)]
-            self.plot_with_labels(low_dim_embs, labels, output_directory + 'c_embedding.png')
+            self.plot_with_labels(low_dim_embs, labels, os.path.join(output_directory, 'c_embedding.png'))
 
             low_dim_embs = tsne.fit_transform(t_embeddings[:plot_only, :])
             labels = [df.reversed_dictionary[i] for i in xrange(plot_only)]
-            self.plot_with_labels(low_dim_embs, labels, output_directory + 't_embedding.png')
+            self.plot_with_labels(low_dim_embs, labels, os.path.join(output_directory, 't_embedding.png'))
         except ImportError as ex:
             print('Please install sklearn, matplotlib, and scipy to show embeddings.')
             print(ex)
