@@ -302,9 +302,9 @@ class EmbeddingModel(object):
                     print 'Specific words: ' + ' '.join(words_list)
         c_norm_embeddings, s_norm_embeddings, t_norm_embeddings = sess.run([self.c_norm_embeddings, self.s_norm_embeddings, self.t_norm_embeddings], feed_dict=feed_dict)
         c_embeddings, s_embeddings, t_embeddings = sess.run([self.c_embeddings, self.s_embeddings, self.t_embeddings], feed_dict=feed_dict)
-        self.output_embedding(c_embeddings, s_embeddings, t_embeddings, c_norm_embeddings, s_norm_embeddings, t_norm_embeddings)
+        self.output_embedding(c_embeddings, s_embeddings, t_embeddings, c_norm_embeddings, s_norm_embeddings, t_norm_embeddings, z, df)
     
-    def output_embedding(self, c_embeddings, s_embeddings, t_embeddings, c_norm_embeddings, s_norm_embeddings, t_norm_embeddings):
+    def output_embedding(self, c_embeddings, s_embeddings, t_embeddings, c_norm_embeddings, s_norm_embeddings, t_norm_embeddings, z, df):
         
 
         weight_average_s_embedding = np.transpose(np.transpose(c_embeddings) * z + np.transpose(s_embeddings) * (1.0 - z))
@@ -324,11 +324,14 @@ class EmbeddingModel(object):
         suffix += "-V%d" % (self.conf.vocabulary_size)
         suffix += "-L%f" % (self.conf.learning_rate)
         output_directory = os.path.join(outpath_directory, suffix);
-        os.makedirs(os.path.abspath(output_directory));
-        with open(output_directory + "option.txt", 'w') as options_output_file:
-            options_output_file.write(json.dumps(self.conf))
 
-        z_file = output_directory + 'z.txt'
+        if not os.path.exists(output_directory):
+            os.makedirs(os.path.abspath(output_directory))
+
+        with open(os.path.join(output_directory, "option.txt"), 'w') as options_output_file:
+            options_output_file.write(json.dumps(vars(self.conf)))
+
+        z_file = os.path.join(output_directory, 'z.txt')
         with open(z_file, 'w') as f:
             for i in xrange(self.conf.vocabulary_size):
                 content = df.reversed_dictionary[i] + ' ' + str(z[i]) + '\n'
@@ -389,7 +392,7 @@ class EmbeddingModel(object):
 
 
     def write_embedding_to_file(self, embedding, output_directory, file_name, dimension, df):
-        f_name = os.path.join(output_directory)
+        f_name = os.path.join(output_directory, file_name)
         f_name += '.txt'
         with open(f_name, 'w') as f:
             f.write('{0}\t{1}\n'.format(self.conf.vocabulary_size, dimension))
