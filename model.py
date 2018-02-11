@@ -5,10 +5,11 @@
 import math
 import datetime
 import os
+import json
 import tensorflow as tf
 import numpy as np
-from constant import *
-from cross_data_handler_v2 import CrossDataFactory
+
+from data_generator import DataFactory
 
 import matplotlib
 matplotlib.use('Agg')
@@ -16,29 +17,33 @@ matplotlib.use('Agg')
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 
-class CrossEmbeddingModel(object):
-    def __init__(self):
+class EmbeddingModel(object):
+    def __init__(self, conf):
+        self.conf = conf
+        np.random.seed(0)
+        tf.set_random_seed(0)
+
         with tf.variable_scope('input'):
             self.s_batch_words = tf.placeholder(tf.int32, [None], name='s_words')
             self.s_batch_y_labels = tf.placeholder(tf.int32, [None], name='s_y_labels')
             self.s_left_labels = tf.placeholder(tf.int32, [None, 1], name='s_left_labels')
             self.s_right_labels = tf.placeholder(tf.int32, [None, 1], name='s_right_labels')
-            self.s_left_negative_samples = tf.placeholder(tf.int32, [None, num_sampled], name='s_left_negative_samples')
-            self.s_right_negative_samples = tf.placeholder(tf.int32, [None, num_sampled], name='s_right_negative_samples')
+            self.s_left_negative_samples = tf.placeholder(tf.int32, [None, self.conf.num_sampled], name='s_left_negative_samples')
+            self.s_right_negative_samples = tf.placeholder(tf.int32, [None, self.conf.num_sampled], name='s_right_negative_samples')
 
             self.t_batch_words = tf.placeholder(tf.int32, [None], name = 't_words')
             self.t_batch_y_labels = tf.placeholder(tf.int32, [None], name='t_y_labels')
             self.t_left_labels = tf.placeholder(tf.int32, [None, 1], name='t_left_labels')
             self.t_right_labels = tf.placeholder(tf.int32, [None, 1], name='t_right_labels')
-            self.t_left_negative_samples = tf.placeholder(tf.int32, [None, num_sampled], name='t_left_negative_samples')
-            self.t_right_negative_samples = tf.placeholder(tf.int32, [None, num_sampled], name='t_right_negative_samples')
+            self.t_left_negative_samples = tf.placeholder(tf.int32, [None, self.conf.num_sampled], name='t_left_negative_samples')
+            self.t_right_negative_samples = tf.placeholder(tf.int32, [None, self.conf.num_sampled], name='t_right_negative_samples')
 
         with tf.variable_scope('embedding'):
-            self.c_embeddings = tf.Variable(tf.random_uniform([vocabulary_size, embedding_dimension], -1.0, 1.0), name='c_embeddings')
-            self.s_embeddings = tf.Variable(tf.random_uniform([vocabulary_size, embedding_dimension], -1.0, 1.0), name='s_emebddings')
-            self.t_embeddings = tf.Variable(tf.random_uniform([vocabulary_size, embedding_dimension], -1.0, 1.0), name='t_embeddings')
-            self.c_nce_weights = tf.Variable(tf.truncated_normal([vocabulary_size, embedding_dimension], stddev=1.0 / math.sqrt(embedding_dimension)))
-            self.c_nce_biases = tf.Variable(tf.zeros([vocabulary_size]))
+            self.c_embeddings = tf.Variable(tf.random_uniform([self.conf.vocabulary_size, self.conf.embedding_dimension], -1.0, 1.0), name='c_embeddings')
+            self.s_embeddings = tf.Variable(tf.random_uniform([self.conf.vocabulary_size, self.conf.embedding_dimension], -1.0, 1.0), name='s_emebddings')
+            self.t_embeddings = tf.Variable(tf.random_uniform([self.conf.vocabulary_size, self.conf.embedding_dimension], -1.0, 1.0), name='t_embeddings')
+            self.c_nce_weights = tf.Variable(tf.truncated_normal([self.conf.vocabulary_size, self.conf.embedding_dimension], stddev=1.0 / math.sqrt(self.conf.embedding_dimension)))
+            self.c_nce_biases = tf.Variable(tf.zeros([self.conf.vocabulary_size]))
             self.s_nce_weights = self.c_nce_weights
             self.s_nce_biases = self.c_nce_biases
             self.t_nce_weights = self.s_nce_weights
@@ -49,17 +54,12 @@ class CrossEmbeddingModel(object):
             # self.t_nce_weights = tf.Variable(tf.truncated_normal([vocabulary_size, embedding_dimension], stddev=1.0 / math.sqrt(embedding_dimension)))
             # self.t_nce_biases = tf.Variable(tf.zeros([vocabulary_size]))
 
-        #=======validation=========
-        self.valid_size = 16
-        self.valid_window = 100
-        self.valid_examples = np.random.choice(valid_window, valid_size, replace=False)
-        self.valid_dataset = tf.constant(self.valid_examples, dtype=tf.int32)
         self._build_model()
 
     def _build_model(self,):
-        self.z = tf.placeholder(tf.float32, [vocabulary_size])
+        self.z = tf.placeholder(tf.float32, [self.conf.vocabulary_size])
         
-        self.c_sentiment = tf.Variable(tf.random_uniform([embedding_dimension,], -1.0, 1.0))
+        self.c_sentiment = tf.Variable(tf.random_uniform([self.conf.embedding_dimension,], -1.0, 1.0))
         self.c_bias = tf.Variable(0.5)
         # self.s_sentiment = tf.Variable(tf.random_uniform([embedding_dimension,], -1.0, 1.0))
         # self.s_bias = tf.Variable(0.5)
@@ -119,23 +119,15 @@ class CrossEmbeddingModel(object):
         self.t_sentiment_specific_loss = tf.reduce_mean(tf.multiply(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.t_specific_predict, labels=tf.cast(self.t_batch_y_labels, tf.float32)), 1.0 - self.t_gamma))
 
 
-        self.s_common_embed_loss = -1 * tf.reduce_mean((tf.log(self.s_left_common_predict + 1e-10) + tf.log(self.s_right_common_predict+ 1e-10) + tf.log(self.s_left_common_predict_negative+ 1e-10) + tf.log(self.s_right_common_predict_negative+ 1e-10)) * self.s_gamma)
-        self.s_specific_embed_loss = -1 * tf.reduce_mean((tf.log(self.s_left_specific_predict+ 1e-10) + tf.log(self.s_right_specific_predict+ 1e-10) + tf.log(self.s_left_specific_predict_negative+ 1e-10) + tf.log(self.s_right_specific_predict_negative)+ 1e-10) * (1.0 - self.s_gamma))
-        self.t_common_embed_loss = -1 * tf.reduce_mean((tf.log(self.t_left_common_predict+ 1e-10) + tf.log(self.t_right_common_predict+ 1e-10) + tf.log(self.t_left_common_predict_negative+ 1e-10) + tf.log(self.t_right_common_predict_negative+ 1e-10)) * self.t_gamma)
-        self.t_specific_embed_loss = -1 * tf.reduce_mean((tf.log(self.t_left_specific_predict+ 1e-10) + tf.log(self.t_right_specific_predict+ 1e-10) + tf.log(self.t_left_specific_predict_negative+ 1e-10) + tf.log(self.t_right_specific_predict_negative+ 1e-10)) * (1.0 - self.t_gamma))
-
-        # self.s_common_embed_loss = -1 * tf.reduce_mean((tf.log(self.s_left_common_predict + 1e-10) + tf.log(self.s_right_common_predict+ 1e-10) + tf.log(self.s_left_common_predict_negative+ 1e-10) + tf.log(self.s_right_common_predict_negative+ 1e-10)))
-        # self.s_specific_embed_loss = -1 * tf.reduce_mean((tf.log(self.s_left_specific_predict+ 1e-10) + tf.log(self.s_right_specific_predict+ 1e-10) + tf.log(self.s_left_specific_predict_negative+ 1e-10) + tf.log(self.s_right_specific_predict_negative)+ 1e-10))
-        # self.t_common_embed_loss = -1 * tf.reduce_mean((tf.log(self.t_left_common_predict+ 1e-10) + tf.log(self.t_right_common_predict+ 1e-10) + tf.log(self.t_left_common_predict_negative+ 1e-10) + tf.log(self.t_right_common_predict_negative+ 1e-10)))
-        # self.t_specific_embed_loss = -1 * tf.reduce_mean((tf.log(self.t_left_specific_predict+ 1e-10) + tf.log(self.t_right_specific_predict+ 1e-10) + tf.log(self.t_left_specific_predict_negative+ 1e-10) + tf.log(self.t_right_specific_predict_negative+ 1e-10)))
-
+        self.s_common_embed_loss = -1 * tf.reduce_mean((tf.log(self.s_left_common_predict + 1e-20) + tf.log(self.s_right_common_predict+ 1e-20) + tf.log(self.s_left_common_predict_negative+ 1e-20) + tf.log(self.s_right_common_predict_negative+ 1e-20)) * self.s_gamma)
+        self.s_specific_embed_loss = -1 * tf.reduce_mean((tf.log(self.s_left_specific_predict+ 1e-20) + tf.log(self.s_right_specific_predict+ 1e-20) + tf.log(self.s_left_specific_predict_negative+ 1e-20) + tf.log(self.s_right_specific_predict_negative)+ 1e-20) * (1.0 - self.s_gamma))
+        self.t_common_embed_loss = -1 * tf.reduce_mean((tf.log(self.t_left_common_predict+ 1e-20) + tf.log(self.t_right_common_predict+ 1e-20) + tf.log(self.t_left_common_predict_negative+ 1e-20) + tf.log(self.t_right_common_predict_negative+ 1e-20)) * self.t_gamma)
+        self.t_specific_embed_loss = -1 * tf.reduce_mean((tf.log(self.t_left_specific_predict+ 1e-20) + tf.log(self.t_right_specific_predict+ 1e-20) + tf.log(self.t_left_specific_predict_negative+ 1e-20) + tf.log(self.t_right_specific_predict_negative+ 1e-20)) * (1.0 - self.t_gamma))
 
         self.loss = self.s_sentiment_common_loss + self.s_sentiment_specific_loss + self.t_sentiment_common_loss + self.t_sentiment_specific_loss + self.s_common_embed_loss + self.s_specific_embed_loss + self.t_common_embed_loss + self.t_specific_embed_loss
 
-        # self.loss = self.s_sentiment_common_loss + self.s_sentiment_specific_loss + self.t_sentiment_common_loss + self.t_sentiment_specific_loss        
-        # self.loss = self.s_common_embed_loss + self.s_specific_embed_loss + self.t_common_embed_loss + self.t_specific_embed_loss
 
-        self.optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(self.loss)
+        self.optimizer = tf.train.GradientDescentOptimizer(self.conf.learning_rate).minimize(self.loss)
         # self.check = tf.add_check_numerics_ops()
         self.c_norm = tf.sqrt(tf.reduce_sum(tf.square(self.c_embeddings), 1, keep_dims=True))
         self.s_norm = tf.sqrt(tf.reduce_sum(tf.square(self.s_embeddings), 1, keep_dims=True))
@@ -150,8 +142,6 @@ class CrossEmbeddingModel(object):
     def predict(self, batch_embed, batch_labels, nce_weights, nce_biases):
         batch_labels_col = batch_labels[:, 0]
         weights = tf.nn.embedding_lookup(nce_weights, batch_labels_col)
-        # biases = tf.nn.embedding_lookup(nce_biases, batch_labels_col)
-        # prob = tf.nn.sigmoid(tf.reduce_sum(batch_embed * weights, 1)  + biases)
         prob = tf.nn.sigmoid(tf.reduce_sum(batch_embed * weights, axis=1))
         return prob
 
@@ -160,23 +150,14 @@ class CrossEmbeddingModel(object):
         negative_prob = tf.transpose(tf.reduce_sum(tf.multiply(tf.transpose(negative_samples_matrix, [1, 0, 2]), matrix), axis=2))
         # return tf.exp(tf.reduce_sum(negative_prob, axis=1) - tf.reduce_sum(tf.log(1.0 + tf.exp(negative_prob)), axis=1))
         return tf.exp(tf.reduce_sum(-1.0 * tf.log(1.0 + tf.exp(negative_prob)), axis=1))
-        
-    # def embedding_loss(self, weight, embed, left_label, right_label, left_negative_label, right_negative_label, nce_weights, nce_biases):
-    #     left_postive_likelihood = 
-    #     left_negative_likelihood = 
-    #     left_loss = tf.nn.nce_loss(weights=nce_weights, biases=nce_biases, labels=left_label, inputs=embed, num_sampled=num_sampled, num_classes=vocabulary_size)
-    #     right_loss = tf.nn.nce_loss(weights=nce_weights, biases=nce_biases, labels=right_label, inputs=embed, num_sampled=num_sampled, num_classes=vocabulary_size)
-    #     return (left_loss + right_loss) * weight
-    #     # return left_loss + right_loss
-        
+                
     def train(self, sess, df):
         print '========================= start training model ========================='
         summary = tf.summary.merge_all()
         writer = tf.summary.FileWriter("log", sess.graph)
         saver = tf.train.Saver()
 
-        # z = np.ones(vocabulary_size) * 0.5
-        z = np.random.uniform(0.0, 1.0, vocabulary_size)
+        z = np.random.uniform(0.0, 1.0, self.conf.vocabulary_size)
         step = 0
         old_loss = []
 
@@ -191,18 +172,11 @@ class CrossEmbeddingModel(object):
         average_t_common_embed_loss = 0.0
         average_t_specific_embed_loss = 0.0
         
-        word_gamma_sum = np.zeros(vocabulary_size)
-        word_gamma_count = np.zeros(vocabulary_size)
+        word_gamma_sum = np.zeros(self.conf.vocabulary_size)
+        word_gamma_count = np.zeros(self.conf.vocabulary_size)
 
         while True:
             s_batch_words, s_batch_y_labels, s_batch_left_labels, s_batch_right_labels, s_batch_left_negative_samples, s_batch_right_negative_samples, t_batch_words, t_batch_y_labels, t_batch_left_labels, t_batch_right_labels, t_batch_left_negative_samples, t_batch_right_negative_samples = df.get_next_batch()
-            # print s_batch_left_negative_samples, s_batch_right_negative_samples
-            # print t_batch_left_negative_samples, t_batch_right_negative_samples
-            # for i, word in enumerate(s_batch_words):
-            #    print df.reversed_dictionary[s_batch_left_labels[i][0]], df.reversed_dictionary[s_batch_words[i]], df.reversed_dictionary[s_batch_right_labels[i][0]]
-
-            # for i, word in enumerate(t_batch_words):
-            #    print df.reversed_dictionary[t_batch_left_labels[i][0]], df.reversed_dictionary[t_batch_words[i]], df.reversed_dictionary[t_batch_right_labels[i][0]]
 
             feed_dict = {
                 self.s_batch_words : s_batch_words,
@@ -250,17 +224,17 @@ class CrossEmbeddingModel(object):
                 word_gamma_sum[word] += t_gamma[i]
                 word_gamma_count[word] += 1
 
-            if step % e_steps == 0 and step > 0:
-                t_z = word_gamma_sum / (word_gamma_count + 1e-10)
+            if step % self.conf.e_steps == 0 and step > 0:
+                t_z = word_gamma_sum / (word_gamma_count + 1e-20)
                 non_zero_index = np.nonzero(t_z)
                 # print t_z[non_zero_index]
                 z[non_zero_index] = t_z[non_zero_index]
                 # print non_zero_index
-                word_gamma_sum = np.zeros(vocabulary_size)
-                word_gamma_count = np.zeros(vocabulary_size)
+                word_gamma_sum = np.zeros(self.conf.vocabulary_size)
+                word_gamma_count = np.zeros(self.conf.vocabulary_size)
 
             step += 1
-            if step > num_steps:
+            if step > self.conf.num_steps:
                 print 'training steps exceeds...'
                 break
             if old_loss and abs(loss_val - old_loss[-1]) < 0.000001:
@@ -279,18 +253,18 @@ class CrossEmbeddingModel(object):
             average_t_sentiment_common_loss += t_sentiment_common_loss
             average_t_sentiment_specific_loss += t_sentiment_specific_loss
 
-            if step % 1000 == 0:
+            if step % self.conf.display_steps == 0:
                 if step > 0:
-                    average_loss /= 1000
-                    average_s_sentiment_common_loss /= 1000
-                    average_s_sentiment_specific_loss /= 1000
-                    average_t_sentiment_common_loss /= 1000
-                    average_t_sentiment_specific_loss /= 1000
+                    average_loss /= self.conf.display_steps
+                    average_s_sentiment_common_loss /= self.conf.display_steps
+                    average_s_sentiment_specific_loss /= self.conf.display_steps
+                    average_t_sentiment_common_loss /= self.conf.display_steps
+                    average_t_sentiment_specific_loss /= self.conf.display_steps
 
-                    average_s_common_embed_loss /= 1000
-                    average_s_specific_embed_loss /= 1000
-                    average_t_common_embed_loss /= 1000
-                    average_t_specific_embed_loss /= 1000
+                    average_s_common_embed_loss /= self.conf.display_steps
+                    average_s_specific_embed_loss /= self.conf.display_steps
+                    average_t_common_embed_loss /= self.conf.display_steps
+                    average_t_specific_embed_loss /= self.conf.display_steps
 
                     print 'average loss at step {0} : {1}'.format(step, average_loss)
                     print average_s_sentiment_common_loss, average_s_sentiment_specific_loss, average_t_sentiment_common_loss, average_t_sentiment_specific_loss,average_s_common_embed_loss, average_s_specific_embed_loss, average_t_common_embed_loss, average_t_specific_embed_loss
@@ -326,52 +300,56 @@ class CrossEmbeddingModel(object):
                             word_index += 1
                         index += 1
                     print 'Specific words: ' + ' '.join(words_list)
+        c_norm_embeddings, s_norm_embeddings, t_norm_embeddings = sess.run([self.c_norm_embeddings, self.s_norm_embeddings, self.t_norm_embeddings], feed_dict=feed_dict)
+        c_embeddings, s_embeddings, t_embeddings = sess.run([self.c_embeddings, self.s_embeddings, self.t_embeddings], feed_dict=feed_dict)
+        self.output_embedding(c_embeddings, s_embeddings, t_embeddings, c_norm_embeddings, s_norm_embeddings, t_norm_embeddings)
+    
+    def output_embedding(self, c_embeddings, s_embeddings, t_embeddings, c_norm_embeddings, s_norm_embeddings, t_norm_embeddings):
+        
 
-        c_embeddings, s_embeddings, t_embeddings = sess.run([self.c_norm_embeddings, self.s_norm_embeddings, self.t_norm_embeddings], feed_dict=feed_dict)
+        weight_average_s_embedding = np.transpose(np.transpose(c_embeddings) * z + np.transpose(s_embeddings) * (1.0 - z))
+        weight_average_t_embedding = np.transpose(np.transpose(c_embeddings) * z + np.transpose(t_embeddings) * (1.0 - z))
 
-        # my_s_embedding = np.transpose(np.transpose(c_embeddings) * z + np.transpose(s_embeddings) * (1.0 - z))
-        # my_t_embedding = np.transpose(np.transpose(c_embeddings) * z + np.transpose(t_embeddings) * (1.0 - z))
-        # my_s_embedding = np.concatenate((c_embeddings, s_embeddings), axis = 1)
-        # my_t_embedding = np.concatenate((c_embeddings, t_embeddings), axis = 1)
-        # my_s_embedding = s_embeddings
-        # my_t_embedding = c_embeddings
-        my_s_embedding = np.transpose(np.concatenate((np.transpose(c_embeddings) * z, np.transpose(s_embeddings) * (1.0 - z)), axis=0))
-        my_t_embedding = np.transpose(np.concatenate((np.transpose(c_embeddings) * z, np.transpose(t_embeddings) * (1.0 - z)), axis=0))
+        weight_concat_s_embedding = np.transpose(np.concatenate((np.transpose(c_embeddings) * z, np.transpose(s_embeddings) * (1.0 - z)), axis=0))
+        weight_concat_t_embedding = np.transpose(np.concatenate((np.transpose(c_embeddings) * z, np.transpose(t_embeddings) * (1.0 - z)), axis=0))
+        
+        concat_s_embedding = np.concatenate((c_embeddings, s_embeddings), axis = 1)
+        concat_t_embedding = np.concatenate((c_embeddings, t_embeddings), axis = 1)
 
         outpath_directory = './output/'
-        now = datetime.datetime.now();
-        suffix = now.strftime("%y%m%d-%H%M%S") + "";
-        suffix += "/";
+        suffix = self.conf.domain1 + '_' + self.conf.domain2
+        suffix += "-N%d" % (self.conf.num_sampled)
+        suffix += "-E%d" % (self.conf.e_steps)
+        suffix += "-B%d" % (self.conf.batch_size)
+        suffix += "-V%d" % (self.conf.vocabulary_size)
+        suffix += "-L%f" % (self.conf.learning_rate)
         output_directory = os.path.join(outpath_directory, suffix);
         os.makedirs(os.path.abspath(output_directory));
-        options_output_file = open(output_directory + "option.txt", 'w');
-        domain_str = df.s_path + '\n' + df.t_path
-        options_output_file.write(domain_str)
-        with open('./constant.py', 'r') as f_config:
-            contents = f_config.read()
-            options_output_file.write(contents)
-        options_output_file.close()
+        with open(output_directory + "option.txt", 'w') as options_output_file:
+            options_output_file.write(json.dumps(self.conf))
 
-        s_embeddings_file = output_directory + 's_embeddings.txt'
-        t_embeddings_file = output_directory + 't_embeddings.txt'
         z_file = output_directory + 'z.txt'
-
-        with open(s_embeddings_file, 'w') as f:
-            f.write('{0}\t{1}\n'.format(vocabulary_size, embedding_dimension))
-            for i in xrange(vocabulary_size):
-                content = df.reversed_dictionary[i] + ' ' + ' '.join([str(x) for x in my_s_embedding[i]]) + '\n'
-                f.write(content)
- 
-        with open(t_embeddings_file, 'w') as f:
-            f.write('{0}\t{1}\n'.format(vocabulary_size, embedding_dimension))
-            for i in xrange(vocabulary_size):
-                content = df.reversed_dictionary[i] + ' ' + ' '.join([str(x) for x in my_t_embedding[i]]) + '\n'
-                f.write(content)
-
         with open(z_file, 'w') as f:
-            for i in xrange(vocabulary_size):
+            for i in xrange(self.conf.vocabulary_size):
                 content = df.reversed_dictionary[i] + ' ' + str(z[i]) + '\n'
                 f.write(content)
+
+        self.write_embedding_to_file(c_embeddings, output_directory, 'common_vec', self.conf.embedding_dimension, df)
+        self.write_embedding_to_file(s_embeddings, output_directory, self.conf.domain1 + '_vec', self.conf.embedding_dimension, df)
+        self.write_embedding_to_file(t_embeddings, output_directory, self.conf.domain2 + '_vec', self.conf.embedding_dimension, df)
+
+        self.write_embedding_to_file(c_norm_embeddings, output_directory, 'common_norm_vec', self.conf.embedding_dimension, df)
+        self.write_embedding_to_file(s_norm_embeddings, output_directory, self.conf.domain1 + '_norm_vec', self.conf.embedding_dimension, df)
+        self.write_embedding_to_file(t_norm_embeddings, output_directory, self.conf.domain2 + '_norm_vec', self.conf.embedding_dimension, df)
+
+        self.write_embedding_to_file(weight_average_s_embedding, output_directory, self.conf.domain1 + '_weight_average_vec', self.conf.embedding_dimension, df)
+        self.write_embedding_to_file(weight_average_t_embedding, output_directory, self.conf.domain2 + '_weight_average_vec', self.conf.embedding_dimension, df)
+
+        self.write_embedding_to_file(concat_s_embedding, output_directory, self.conf.domain1 + '_concat_vec', self.conf.embedding_dimension * 2, df)
+        self.write_embedding_to_file(concat_t_embedding, output_directory, self.conf.domain2 + '_concat_vec', self.conf.embedding_dimension * 2, df)
+
+        self.write_embedding_to_file(weight_concat_s_embedding, output_directory, self.conf.domain1 + '_weight_concat_vec', self.conf.embedding_dimension * 2, df)
+        self.write_embedding_to_file(weight_concat_s_embedding, output_directory, self.conf.domain1 + '_weight_concat_vec', self.conf.embedding_dimension * 2, df)
 
         try:
             # pylint: disable=g-import-not-at-top
@@ -408,3 +386,13 @@ class CrossEmbeddingModel(object):
                          va='bottom')
 
         plt.savefig(filename)
+
+
+    def write_embedding_to_file(self, embedding, output_directory, file_name, dimension, df):
+        f_name = os.path.join(output_directory)
+        f_name += '.txt'
+        with open(f_name, 'w') as f:
+            f.write('{0}\t{1}\n'.format(self.conf.vocabulary_size, dimension))
+            for i in xrange(self.conf.vocabulary_size):
+                content = df.reversed_dictionary[i] + ' ' + ' '.join([str(x) for x in embedding[i]]) + '\n'
+                f.write(content)

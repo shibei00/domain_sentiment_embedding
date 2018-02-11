@@ -5,14 +5,14 @@
 import collections
 import random
 import numpy as np
-from constant import *
 
-from data_handler import DataFactory
-
-class CrossDataFactory(object):
-    def __init__(self, s_path, t_path):
-        self.s_path = s_path
-        self.t_path = t_path
+class DataFactory(object):
+    def __init__(self, conf):
+        random.seed(0)
+        np.random.seed(0)
+        self.conf = conf
+        self.s_path = './processed/train/' + self.conf.domain1 + '.txt'
+        self.t_path = './processed/train/' + self.conf.domain2 + '.txt'
         self.dictionary = dict()
         self.s_data = []
         self.s_labels = []
@@ -42,11 +42,10 @@ class CrossDataFactory(object):
                     print i
                 t_list = line.strip().split('\t')
                 if len(t_list) != 2:
-                    print line
+                    # print line
                     continue
 
                 text, label = t_list[0], t_list[1]
-
                 words = text.split()
                 for word in words:
                     if word in d:
@@ -55,7 +54,6 @@ class CrossDataFactory(object):
                         d[word] = 1
                 s_text_data.append(words)
                 self.s_labels.append(float(label))
-
 
         with open(self.t_path) as f:
             contents = f.readlines()
@@ -80,7 +78,7 @@ class CrossDataFactory(object):
                 t_text_data.append(words)
                 self.t_labels.append(float(label))
         counter = collections.Counter(d)
-        self.count.extend(counter.most_common(vocabulary_size - 1))
+        self.count.extend(counter.most_common(self.conf.vocabulary_size - 1))
 
         for word, _ in self.count:
             self.dictionary[word] = len(self.dictionary)
@@ -94,13 +92,8 @@ class CrossDataFactory(object):
                     unk_count += 1
                 t_list.append(index)
             self.s_data.append(t_list)
-            l = min(len(t_list), max_length)
-            self.s_input_length.append(l)
-            if len(t_list) >= max_length:
-                self.s_input.append(t_list[:max_length])
-            else:
-                t_list += [0] * (max_length - len(t_list))
-                self.s_input.append(t_list)
+            self.s_input_length.append(len(t_list))
+            self.s_input.append(t_list)
             
         self.s_words_list = []
         self.s_y_list = []
@@ -129,13 +122,8 @@ class CrossDataFactory(object):
                     unk_count += 1
                 t_list.append(index)
             self.t_data.append(t_list)
-            l = min(len(t_list), max_length)
-            self.t_input_length.append(l)
-            if len(t_list) >= max_length:
-                self.t_input.append(t_list[:max_length])
-            else:
-                t_list += [0] * (max_length - len(t_list))
-                self.t_input.append(t_list)
+            self.t_input_length.append(len(t_list))
+            self.t_input.append(t_list)
 
         self.t_words_list = []
         self.t_y_list = []
@@ -157,8 +145,7 @@ class CrossDataFactory(object):
                     self.t_right_list.append([self.t_input[i][j + 1]])
         
         self.count[0][1] = unk_count
-
-        self.pow_count = np.zeros(vocabulary_size, dtype=np.int32)
+        self.pow_count = np.zeros(self.conf.vocabulary_size, dtype=np.int32)
 
         count_index = 0
         for word, c in self.count:
@@ -177,8 +164,8 @@ class CrossDataFactory(object):
                 word_index += 1
                 t_sum += self.pow_count_distribution[word_index]
 
-            if word_index >= vocabulary_size:
-                word_index = vocabulary_size - 1
+            if word_index >= self.conf.vocabulary_size:
+                word_index = self.conf.vocabulary_size - 1
 
         self.reversed_dictionary = dict(zip(self.dictionary.values(), self.dictionary.keys()))
         self.shuffle()
@@ -191,18 +178,18 @@ class CrossDataFactory(object):
     def get_next_batch_s(self,):
         if self.s_batch_id == len(self.s_words_list):
             self.s_batch_id = 0
-        end_index = min(self.s_batch_id + batch_size, len(self.s_words_list))
+        end_index = min(self.s_batch_id + self.conf.batch_size, len(self.s_words_list))
         
         batch_words = self.s_words_list[self.s_batch_id : end_index]
         batch_y = self.s_y_list[self.s_batch_id : end_index]
         batch_left = self.s_left_list[self.s_batch_id : end_index]
         batch_right = self.s_right_list[self.s_batch_id : end_index]
-        batch_left_negative_samples = np.zeros((len(batch_words), num_sampled), dtype=np.int32)
-        batch_right_negative_samples = np.zeros((len(batch_words), num_sampled), dtype=np.int32)
+        batch_left_negative_samples = np.zeros((len(batch_words), self.conf.num_sampled), dtype=np.int32)
+        batch_right_negative_samples = np.zeros((len(batch_words), self.conf.num_sampled), dtype=np.int32)
 
         for i in xrange(len(batch_words)):
             j = 0
-            while j < num_sampled:
+            while j < self.conf.num_sampled:
                 random_word = self.sample_word()
                 if random_word == batch_left[i]:
                     continue
@@ -212,7 +199,7 @@ class CrossDataFactory(object):
 
         for i in xrange(len(batch_words)):
             j = 0
-            while j < num_sampled:
+            while j < self.conf.num_sampled:
                 random_word = self.sample_word()
                 if random_word == batch_right[i]:
                     continue
@@ -220,28 +207,24 @@ class CrossDataFactory(object):
                     batch_right_negative_samples[i][j] = random_word
                     j += 1
 
-
-        assert num_skips <= 2 * skip_window
-        span = 2 * skip_window + 1
-
-        self.s_batch_id = min(self.s_batch_id + batch_size, len(self.s_words_list))
+        self.s_batch_id = min(self.s_batch_id + self.conf.batch_size, len(self.s_words_list))
         return batch_words, batch_y, batch_left, batch_right, batch_left_negative_samples, batch_right_negative_samples
 
     def get_next_batch_t(self,):
         if self.t_batch_id == len(self.t_words_list):
             self.t_batch_id = 0
-        end_index = min(self.t_batch_id + batch_size, len(self.t_words_list))
+        end_index = min(self.t_batch_id + self.conf.batch_size, len(self.t_words_list))
         
         batch_words = self.t_words_list[self.t_batch_id : end_index]
         batch_y = self.t_y_list[self.t_batch_id : end_index]
         batch_left = self.t_left_list[self.t_batch_id : end_index]
         batch_right = self.t_right_list[self.t_batch_id : end_index]
-        batch_left_negative_samples = np.zeros((len(batch_words), num_sampled), dtype=np.int32)
-        batch_right_negative_samples = np.zeros((len(batch_words), num_sampled), dtype=np.int32)
+        batch_left_negative_samples = np.zeros((len(batch_words), self.conf.num_sampled), dtype=np.int32)
+        batch_right_negative_samples = np.zeros((len(batch_words), self.conf.num_sampled), dtype=np.int32)
 
         for i in xrange(len(batch_words)):
             j = 0
-            while j < num_sampled:
+            while j < self.conf.num_sampled:
                 random_word = self.sample_word()
                 if random_word == batch_left[i]:
                     continue
@@ -251,18 +234,15 @@ class CrossDataFactory(object):
 
         for i in xrange(len(batch_words)):
             j = 0
-            while j < num_sampled:
+            while j < self.conf.num_sampled:
                 random_word = self.sample_word()
                 if random_word == batch_right[i]:
                     continue
                 else:
                     batch_right_negative_samples[i][j] = random_word
                     j += 1
-        
-        assert num_skips <= 2 * skip_window
-        span = 2 * skip_window + 1
 
-        self.t_batch_id = min(self.t_batch_id + batch_size, len(self.t_words_list))
+        self.t_batch_id = min(self.t_batch_id + self.conf.batch_size, len(self.t_words_list))
         return batch_words, batch_y, batch_left, batch_right, batch_left_negative_samples, batch_right_negative_samples
 
     def sample_word(self,):
