@@ -1,0 +1,5 @@
+/data
+/log
+/output
+/processed
+*.pyc
