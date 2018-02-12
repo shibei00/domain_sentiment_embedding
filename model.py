@@ -318,7 +318,7 @@ class EmbeddingModel(object):
 
         outpath_directory = './output/'
         suffix = self.conf.domain1 + '_' + self.conf.domain2
-        suffix += "-N%d" % (self.conf.num_sampled)
+        suffix += "-N%d" % (self.conf.num_steps)
         suffix += "-E%d" % (self.conf.e_steps)
         suffix += "-B%d" % (self.conf.batch_size)
         suffix += "-V%d" % (self.conf.vocabulary_size)
