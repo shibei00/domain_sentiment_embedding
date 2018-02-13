@@ -61,10 +61,11 @@ class EmbeddingModel(object):
         
         self.c_sentiment = tf.Variable(tf.random_uniform([self.conf.embedding_dimension,], -1.0, 1.0))
         self.c_bias = tf.Variable(0.5)
-        # self.s_sentiment = tf.Variable(tf.random_uniform([embedding_dimension,], -1.0, 1.0))
+        # self.s_sentiment = tf.Variable(tf.random_uniform([self.conf.embedding_dimension,], -1.0, 1.0))
         # self.s_bias = tf.Variable(0.5)
-        # self.t_sentiment = tf.Variable(tf.random_uniform([embedding_dimension,], -1.0, 1.0))
+        # self.t_sentiment = tf.Variable(tf.random_uniform([self.conf.embedding_dimension,], -1.0, 1.0))
         # self.t_bias = tf.Variable(0.5)
+
         self.s_sentiment = self.c_sentiment
         self.s_bias = self.c_bias
         self.t_sentiment = self.c_sentiment
@@ -119,10 +120,10 @@ class EmbeddingModel(object):
         self.t_sentiment_specific_loss = tf.reduce_mean(tf.multiply(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.t_specific_predict, labels=tf.cast(self.t_batch_y_labels, tf.float32)), 1.0 - self.t_gamma))
 
 
-        self.s_common_embed_loss = -1 * tf.reduce_mean((tf.log(self.s_left_common_predict + 1e-20) + tf.log(self.s_right_common_predict+ 1e-20) + tf.log(self.s_left_common_predict_negative+ 1e-20) + tf.log(self.s_right_common_predict_negative+ 1e-20)) * self.s_gamma)
-        self.s_specific_embed_loss = -1 * tf.reduce_mean((tf.log(self.s_left_specific_predict+ 1e-20) + tf.log(self.s_right_specific_predict+ 1e-20) + tf.log(self.s_left_specific_predict_negative+ 1e-20) + tf.log(self.s_right_specific_predict_negative)+ 1e-20) * (1.0 - self.s_gamma))
-        self.t_common_embed_loss = -1 * tf.reduce_mean((tf.log(self.t_left_common_predict+ 1e-20) + tf.log(self.t_right_common_predict+ 1e-20) + tf.log(self.t_left_common_predict_negative+ 1e-20) + tf.log(self.t_right_common_predict_negative+ 1e-20)) * self.t_gamma)
-        self.t_specific_embed_loss = -1 * tf.reduce_mean((tf.log(self.t_left_specific_predict+ 1e-20) + tf.log(self.t_right_specific_predict+ 1e-20) + tf.log(self.t_left_specific_predict_negative+ 1e-20) + tf.log(self.t_right_specific_predict_negative+ 1e-20)) * (1.0 - self.t_gamma))
+        self.s_common_embed_loss = -1 * tf.reduce_mean((tf.log(self.s_left_common_predict + 1e-10) + tf.log(self.s_right_common_predict+ 1e-10) + tf.log(self.s_left_common_predict_negative+ 1e-10) + tf.log(self.s_right_common_predict_negative+ 1e-10)) * self.s_gamma)
+        self.s_specific_embed_loss = -1 * tf.reduce_mean((tf.log(self.s_left_specific_predict+ 1e-10) + tf.log(self.s_right_specific_predict+ 1e-10) + tf.log(self.s_left_specific_predict_negative+ 1e-10) + tf.log(self.s_right_specific_predict_negative)+ 1e-10) * (1.0 - self.s_gamma))
+        self.t_common_embed_loss = -1 * tf.reduce_mean((tf.log(self.t_left_common_predict+ 1e-10) + tf.log(self.t_right_common_predict+ 1e-10) + tf.log(self.t_left_common_predict_negative+ 1e-10) + tf.log(self.t_right_common_predict_negative+ 1e-10)) * self.t_gamma)
+        self.t_specific_embed_loss = -1 * tf.reduce_mean((tf.log(self.t_left_specific_predict+ 1e-10) + tf.log(self.t_right_specific_predict+ 1e-10) + tf.log(self.t_left_specific_predict_negative+ 1e-10) + tf.log(self.t_right_specific_predict_negative+ 1e-10)) * (1.0 - self.t_gamma))
 
         self.loss = self.s_sentiment_common_loss + self.s_sentiment_specific_loss + self.t_sentiment_common_loss + self.t_sentiment_specific_loss + self.s_common_embed_loss + self.s_specific_embed_loss + self.t_common_embed_loss + self.t_specific_embed_loss
 
@@ -225,7 +226,7 @@ class EmbeddingModel(object):
                 word_gamma_count[word] += 1
 
             if step % self.conf.e_steps == 0 and step > 0:
-                t_z = word_gamma_sum / (word_gamma_count + 1e-20)
+                t_z = word_gamma_sum / (word_gamma_count + 1e-10)
                 non_zero_index = np.nonzero(t_z)
                 # print t_z[non_zero_index]
                 z[non_zero_index] = t_z[non_zero_index]
